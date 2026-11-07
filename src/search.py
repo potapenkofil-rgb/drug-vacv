@@ -20,7 +20,7 @@ TEST_VARIANCE = 2018936.88
 CEILING = 5000.0
 
 PLAN = {
-    "база": {},
+    "база": {"morgan": {"radius": 2, "size": 2048, "chirality": False, "counts": False}},
     "соседи": {"neighbours": True},
     "контекст": {"context": True},
     "подпись": {"context": True, "title": True},
@@ -42,6 +42,9 @@ PLAN = {
     "пары": {"pairs": 1024},
     "пары и хиральность": {"pairs": 1024, "morgan": {"radius": 2, "size": 2048, "chirality": True}},
     "пары 2048": {"pairs": 2048},
+    "потолок цели": {"scale": "logcap"},
+    "потолок цели 2500": {"scale": "logcap2500"},
+    "потолок цели 1500": {"scale": "logcap1500"},
     "хиральность 8192": {"morgan": {"radius": 2, "size": 8192, "chirality": True}},
     "хиральность 4096 и пары": {"pairs": 2048, "morgan": {"radius": 2, "size": 4096, "chirality": True}},
     "хиральность 4096 радиус 3": {"morgan": {"radius": 3, "size": 4096, "chirality": True}},
@@ -77,6 +80,10 @@ def forward(selectivity, scale):
         return np.sqrt(np.clip(selectivity, 0.0, CEILING))
     if scale == "quart":
         return np.clip(selectivity, 0.0, CEILING) ** 0.25
+    if scale.startswith("logcap"):
+        tail = scale[len("logcap"):]
+        limit = float(tail) if tail else CEILING
+        return np.log1p(np.clip(selectivity, 0.0, limit))
     return np.log1p(selectivity)
 
 
