@@ -35,7 +35,7 @@ def descriptor_row(mol):
     return np.array([values.get(name, np.nan) for name in DESCRIPTOR_NAMES], dtype=float)
 
 
-def build_matrix(smiles_list, radius=2, size=2048, chirality=False):
+def build_matrix(smiles_list, radius=2, size=2048, chirality=False, counts=False):
     generator = rdFingerprintGenerator.GetMorganGenerator(
         radius=radius, fpSize=size, includeChirality=chirality)
     rows = []
@@ -43,7 +43,10 @@ def build_matrix(smiles_list, radius=2, size=2048, chirality=False):
         mol = parse(smiles)
         if mol is None:
             raise ValueError(f"не разбирается SMILES: {smiles}")
-        fingerprint = np.array(generator.GetFingerprintAsNumPy(mol), dtype=float)
+        if counts:
+            fingerprint = np.array(generator.GetCountFingerprintAsNumPy(mol), dtype=float)
+        else:
+            fingerprint = np.array(generator.GetFingerprintAsNumPy(mol), dtype=float)
         rows.append(np.concatenate([descriptor_row(mol), fingerprint]))
     matrix = np.nan_to_num(np.vstack(rows), nan=0.0, posinf=0.0, neginf=0.0)
     return np.clip(matrix, -1e6, 1e6)

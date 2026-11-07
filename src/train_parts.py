@@ -102,7 +102,7 @@ def main():
     activity.save_model(str(PARTS / "ic50.cbm"))
     toxicity.save_model(str(PARTS / "cc50.cbm"))
     classifier.save_model(str(PARTS / "active.cbm"))
-    (MODELS / "feature_config.json").write_text(json.dumps({
+    (MODELS / "parts_config.json").write_text(json.dumps({
         "approach": "parts",
         "morgan": config["morgan"],
         "target": "log",

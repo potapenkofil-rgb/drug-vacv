@@ -21,6 +21,8 @@ def target_stats():
 
 
 def solve(full_score, part_score, factor):
+    if abs(factor - 1.0) < 1e-9:
+        raise ValueError("множитель 1.0 не даёт второго уравнения, нужен любой другой")
     full = full_score - SQUARE_MEAN
     part = part_score - SQUARE_MEAN
     square = (part - factor * full) / (factor ** 2 - factor)
@@ -34,6 +36,7 @@ def main():
     parser.add_argument("--full-score", type=float, required=True)
     parser.add_argument("--half-score", type=float, required=True)
     parser.add_argument("--factor", type=float, default=0.5)
+    parser.add_argument("--ceiling", type=float, default=5000.0)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -50,7 +53,9 @@ def main():
     expected = variance - covariance ** 2 / spread
     correlation = covariance / np.sqrt(spread * variance)
 
-    table[COLUMN] = np.clip(slope * predictions + shift, 0.0, None)
+    final = np.clip(slope * predictions + shift, 0.0, args.ceiling)
+    trimmed = int((slope * predictions + shift > args.ceiling).sum())
+    table[COLUMN] = final
     table.to_csv(args.output, index=False, encoding="utf-8")
 
     report = {
@@ -60,6 +65,8 @@ def main():
         "shift": shift,
         "expected_score": expected,
         "best_constant_score": variance,
+        "ceiling": args.ceiling,
+        "trimmed": trimmed,
     }
     REPORTS.mkdir(parents=True, exist_ok=True)
     name = Path(args.predictions).stem
@@ -69,6 +76,7 @@ def main():
     print(f"корреляция с правдой: {correlation:.3f}")
     print(f"преобразование: {slope:.4f} * прогноз + {shift:.1f}")
     print(f"ожидаемый результат: {expected:,.0f} (лучшая константа даёт {variance:,.0f})")
+    print(f"срезано потолком {args.ceiling:,.0f}: {trimmed} строк")
     print(f"{args.output} записан")
 
 

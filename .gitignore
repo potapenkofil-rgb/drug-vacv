@@ -3,3 +3,9 @@ __pycache__/
 .venv/
 *.log
 catboost_info/
+models/folds/
+models/parts/
+data/processed/train_full.csv
+data/processed/train_vacv.csv
+reports/*publicleaderboard*
+reports/*.zip

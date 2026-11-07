@@ -4,6 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
+import quiet
+
 import numpy as np
 import pandas as pd
 import yaml
@@ -48,14 +50,18 @@ def to_model_scale(selectivity, target):
 
 
 def from_model_scale(value, target, correction=1.0):
-    back = np.exp(value) * correction - 1.0 if target == "log" else value * correction
+    back = np.expm1(value) * correction if target == "log" else value * correction
     return np.clip(back, 0.0, None)
 
 
-def mean_correction(actual, predicted_on_log_scale, target, enabled):
-    if target != "log" or not enabled:
+def mean_correction(actual, predicted_on_log_scale, target, mode):
+    if target != "log" or mode in (None, False, "none"):
         return 1.0
-    return float(np.mean(np.exp(np.log1p(actual) - predicted_on_log_scale)))
+    if mode is True or mode == "smearing":
+        return float(np.mean(np.exp(np.log1p(actual) - predicted_on_log_scale)))
+    plain = from_model_scale(predicted_on_log_scale, target)
+    weight = float(np.sum(plain ** 2))
+    return float(np.sum(actual * plain) / weight) if weight > 0 else 1.0
 
 
 def quality(actual, predicted):
@@ -75,7 +81,9 @@ def quality(actual, predicted):
 
 
 def base_features(table, config):
-    numbers = build_matrix(table["smiles_canonical"], config["morgan"]["radius"], config["morgan"]["size"])
+    shape = config["morgan"]
+    numbers = build_matrix(table["smiles_canonical"], shape["radius"], shape["size"],
+                           bool(shape.get("chirality")), bool(shape.get("counts")))
     bits = numbers[:, len(DESCRIPTOR_NAMES):]
     vocabulary = []
     if config.get("use_assay_context"):
@@ -131,6 +139,7 @@ def print_quality(title, values):
 
 
 def main():
+    quiet.step_aside()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/baseline.yaml")
     parser.add_argument("--table", default="train.csv")
@@ -156,7 +165,7 @@ def main():
                                  target, from_organizers, keep=fold_models)
     checked = selectivity[from_organizers]
     correction = mean_correction(checked, on_model_scale[from_organizers], target,
-                                 config.get("mean_correction", False))
+                                 config.get("correction", config.get("mean_correction", False)))
     predicted = from_model_scale(on_model_scale[from_organizers], target, correction)
     plain = from_model_scale(on_model_scale[from_organizers], target)
     values = quality(checked, predicted)

@@ -19,20 +19,31 @@ TOXICITY_TYPES = ("CC50", "TC50", "GI50")
 TO_MICROMOLAR = {"nM": 0.001, "uM": 1.0, "µM": 1.0, "mM": 1000.0, "M": 1000000.0}
 
 
-def request_json(path, params, attempts=4):
+class NoMorePages(Exception):
+    pass
+
+
+def request_json(path, params, attempts=6):
     url = f"{BASE}/{path}.json?{urllib.parse.urlencode(params)}"
     request = urllib.request.Request(url, headers={"User-Agent": "drug-vacv-hackathon"})
     for attempt in range(1, attempts + 1):
         try:
             with urllib.request.urlopen(request, timeout=90) as response:
                 answer = json.loads(response.read().decode("utf-8"))
-            time.sleep(0.5)
+            time.sleep(0.6)
             return answer
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                raise NoMorePages() from error
+            if attempt == attempts:
+                raise
+            print(f"  повтор {attempt} после ответа {error.code}")
+            time.sleep(10 * attempt)
         except Exception as error:
             if attempt == attempts:
                 raise
             print(f"  повтор {attempt} после ошибки: {error}")
-            time.sleep(3 * attempt)
+            time.sleep(10 * attempt)
     return {}
 
 
@@ -41,8 +52,8 @@ def request_pages(path, params, key, limit):
     while len(collected) < limit:
         page = dict(params, limit=min(200, limit - len(collected)), offset=len(collected))
         try:
-            answer = request_json(path, page, attempts=2)
-        except Exception:
+            answer = request_json(path, page)
+        except NoMorePages:
             break
         chunk = answer.get(key, [])
         collected.extend(chunk)
@@ -59,6 +70,11 @@ def targets_for(keyword):
         if keyword in description:
             found.append(target["target_chembl_id"])
     return sorted(set(found))
+
+
+def assays_for(keyword):
+    found = request_pages("assay", {"assay_organism__icontains": keyword}, "assays", 2000)
+    return sorted({a["assay_chembl_id"] for a in found if a.get("assay_chembl_id")})
 
 
 def micromolar(value, units):
@@ -110,6 +126,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=2000)
     parser.add_argument("--organisms", default="vaccinia")
+    parser.add_argument("--by-assay", action="store_true")
     parser.add_argument("--output", default="data/external/chembl_vacv.csv")
     args = parser.parse_args()
 
@@ -123,6 +140,14 @@ def main():
         found = request_pages("activity", {"target_chembl_id": target}, "activities", args.limit)
         measurements.extend(found)
         print(f"  {target}: {len(found)} измерений")
+
+    if args.by_assay:
+        assays = sorted({name for word in keywords for name in assays_for(word)})
+        print(f"анализов с таким организмом: {len(assays)}")
+        for part in by_parts(assays, 20):
+            measurements.extend(request_pages(
+                "activity", {"assay_chembl_id__in": ",".join(part)}, "activities", 4000))
+        print(f"измерений после анализов: {len(measurements)}")
 
     activity = as_table(measurements, ACTIVITY_TYPES)
     if activity.empty:

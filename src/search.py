@@ -4,6 +4,8 @@ import json
 import os
 import sys
 
+import quiet
+
 import numpy as np
 import pandas as pd
 from catboost import CatBoostRegressor
@@ -40,6 +42,13 @@ PLAN = {
     "пары": {"pairs": 1024},
     "пары и хиральность": {"pairs": 1024, "morgan": {"radius": 2, "size": 2048, "chirality": True}},
     "пары 2048": {"pairs": 2048},
+    "хиральность 8192": {"morgan": {"radius": 2, "size": 8192, "chirality": True}},
+    "хиральность 4096 и пары": {"pairs": 2048, "morgan": {"radius": 2, "size": 4096, "chirality": True}},
+    "хиральность 4096 радиус 3": {"morgan": {"radius": 3, "size": 4096, "chirality": True}},
+    "хиральность 4096 три зерна": {"seeds": 3, "morgan": {"radius": 2, "size": 4096, "chirality": True}},
+    "хиральность 4096 счётчики": {"morgan": {"radius": 2, "size": 4096, "chirality": True, "counts": True}},
+    "хиральность 4096 глубина 8": {"regressor": {"depth": 8}, "morgan": {"radius": 2, "size": 4096, "chirality": True}},
+    "хиральность 4096 деревьев 2500": {"regressor": {"iterations": 2500, "learning_rate": 0.015}, "morgan": {"radius": 2, "size": 4096, "chirality": True}},
     "соседи и корень": {"neighbours": True, "scale": "sqrt"},
     "глубина 4 и корень": {"scale": "sqrt", "regressor": {"depth": 4}},
 }
@@ -127,14 +136,15 @@ def run(name, options, numbers, bits, labels, selectivity, structures, checkable
         goal = pd.Series(np.clip(actual, 0.0, cap))
         values[f"потолок {cap:.0f}"] = float(goal.corr(pd.Series(predicted)))
     values["ранги"] = float(pd.Series(actual).corr(pd.Series(predicted), method="spearman"))
-    values["ожидаемый MSE"] = TEST_VARIANCE * (1 - values["потолок 5000"] ** 2)
+    values["оценка MSE сверху"] = TEST_VARIANCE * (1 - values["потолок 5000"] ** 2)
     print(f"{name}: потолок5000 {values['потолок 5000']:.3f} | потолок2500 "
           f"{values['потолок 2500']:.3f} | ранги {values['ранги']:.3f} "
-          f"| ожидаемый MSE {values['ожидаемый MSE']:,.0f}", flush=True)
+          f"| оценка MSE сверху {values['оценка MSE сверху']:,.0f}", flush=True)
     return values
 
 
 def main():
+    quiet.step_aside()
     wanted = sys.argv[1:] or list(PLAN)
     config = read_config(os.environ.get("CONFIG", "configs/baseline.yaml"))
     config["cv"]["repeats"] = int(os.environ.get("REPEATS", 2))
@@ -143,12 +153,14 @@ def main():
     selectivity = table["si_vacv"].to_numpy(dtype=float)
     structures = table["structure_key"].astype(str).to_numpy()
     checkable = (table["source"] == "organizers").to_numpy()
-    vocabulary = assay_vocabulary(table["strain"], table["culture"], keep=60)
+    source = table[checkable] if os.environ.get("VOCAB") == "organizers" else table
+    vocabulary = assay_vocabulary(source["strain"], source["culture"],
+                                  keep=int(os.environ.get("KEEP", 60)))
     cache = {}
 
     def prepared(shape):
         if shape not in cache:
-            built = build_matrix(table["smiles_canonical"], shape[0], shape[1], shape[2])
+            built = build_matrix(table["smiles_canonical"], shape[0], shape[1], shape[2], shape[4])
             extra = assay_matrix(table["strain"], table["culture"], vocabulary)
             blocks = [built, extra]
             if shape[3]:
@@ -163,7 +175,7 @@ def main():
         options = PLAN[name]
         shape = options.get("morgan", config["morgan"])
         numbers, bits = prepared((shape["radius"], shape["size"], bool(shape.get("chirality")),
-                                  int(options.get("pairs", 0))))
+                                  int(options.get("pairs", 0)), bool(shape.get("counts"))))
         labels = labels_of(table, with_title=bool(options.get("title")))
         results.append(run(name, options, numbers, bits, labels, selectivity,
                            structures, checkable, config))

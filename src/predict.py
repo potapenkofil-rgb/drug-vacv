@@ -4,6 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
+import quiet
+
 import numpy as np
 import pandas as pd
 from catboost import CatBoostRegressor
@@ -20,6 +22,7 @@ SUBMISSIONS = Path("submissions")
 
 
 def main():
+    quiet.step_aside()
     parser = argparse.ArgumentParser()
     parser.add_argument("--folds", action="store_true")
     parser.add_argument("--output", default="submissions/submission.csv")
@@ -30,16 +33,22 @@ def main():
     test = pd.read_csv(PROCESSED / "test.csv")
     train = pd.read_csv(PROCESSED / "train.csv")
     sample = pd.read_csv(RAW / "sample_submit.csv")
-    highest_known = float(settings.get("ceiling") or train["si_vacv"].max())
+    highest_known = settings.get("ceiling")
+    if not highest_known:
+        highest_known = float(np.percentile(train["si_vacv"], 99))
+        print("в конфиге нет потолка, беру 99-й процентиль обучения")
+    highest_known = float(highest_known)
 
-    numbers = build_matrix(test["smiles_canonical"], morgan["radius"], morgan["size"])
+    numbers = build_matrix(test["smiles_canonical"], morgan["radius"], morgan["size"],
+                           bool(morgan.get("chirality")), bool(morgan.get("counts")))
     bits = numbers[:, len(DESCRIPTOR_NAMES):]
     vocabulary = settings.get("assay_vocabulary") or []
     if vocabulary:
         numbers = np.hstack([numbers, assay_matrix(test["strain"], test["culture"], vocabulary)])
     columns = [numbers]
     if settings.get("use_neighbours"):
-        learned = build_matrix(train["smiles_canonical"], morgan["radius"], morgan["size"])
+        learned = build_matrix(train["smiles_canonical"], morgan["radius"], morgan["size"],
+                               bool(morgan.get("chirality")), bool(morgan.get("counts")))
         columns.append(read_across(bits, learned[:, len(DESCRIPTOR_NAMES):],
                                    train["si_vacv"].to_numpy(dtype=float)))
     if settings.get("use_context_encoding"):

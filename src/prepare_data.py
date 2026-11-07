@@ -28,8 +28,9 @@ def shape(frame, labelled):
     out["smiles_original"] = frame["SMILES"].astype(str)
     out["smiles_canonical"] = [canonical_smiles(s) for s in frame["SMILES"]]
     out["structure_key"] = [structure_key(s) for s in frame["SMILES"]]
-    out["cc50_um"] = pd.to_numeric(frame["CC50_uM"], errors="coerce")
-    out["ic50_um_vacv"] = pd.to_numeric(frame["IC50_uM_VACV"], errors="coerce")
+    if labelled:
+        out["cc50_um"] = pd.to_numeric(frame["CC50_uM"], errors="coerce")
+        out["ic50_um_vacv"] = pd.to_numeric(frame["IC50_uM_VACV"], errors="coerce")
     out["strain"] = frame["strain"].astype(str)
     out["culture"] = frame["Culture"].astype(str)
     out["source"] = "organizers"
@@ -40,7 +41,8 @@ def shape(frame, labelled):
 
 
 def load_external():
-    files = sorted(EXTERNAL.glob("*.csv"))
+    order = {"chembl_vacv.csv": 0, "chembl_pox.csv": 1, "chembl_assays.csv": 2}
+    files = sorted(EXTERNAL.glob("*.csv"), key=lambda p: (order.get(p.name, 9), p.name))
     if not files:
         return None
     pieces = []
@@ -83,11 +85,15 @@ def main():
     test = test[test["smiles_canonical"].notna()]
 
     before = len(train)
-    train = train.sort_values("si_vacv", ascending=False).drop_duplicates("structure_key", keep="first")
+    middle = train.groupby("structure_key")["si_vacv"].transform("median")
+    train = train.assign(distance_to_middle=(train["si_vacv"] - middle).abs())
+    train = train.sort_values("distance_to_middle").drop_duplicates("structure_key", keep="first")
+    train = train.drop(columns="distance_to_middle")
     dropped = before - len(train)
 
     added = 0
     removed_as_test = 0
+    removed_by_skeleton = 0
     removed_out_of_range = 0
     if args.with_external:
         external = load_external()
@@ -98,8 +104,11 @@ def main():
             removed_out_of_range = int((~in_range).sum())
             external = external[in_range]
             in_test = external["structure_key"].isin(set(test["structure_key"]))
+            skeletons = set(test["structure_key"].astype(str).str[:14])
+            same_skeleton = external["structure_key"].astype(str).str[:14].isin(skeletons)
             removed_as_test = int(in_test.sum())
-            external = external[~in_test]
+            removed_by_skeleton = int((same_skeleton & ~in_test).sum())
+            external = external[~(in_test | same_skeleton)]
             external = external[~external["structure_key"].isin(set(train["structure_key"]))]
             train = pd.concat([train, external], ignore_index=True)
             added = len(external)
@@ -109,6 +118,7 @@ def main():
     print(f"train: {len(train)} строк (дубликатов структуры убрано {dropped}, из внешних источников добавлено {added})")
     if args.with_external:
         print(f"внешних молекул отброшено как совпадающие с test: {removed_as_test}")
+        print(f"внешних молекул отброшено по скелету структуры: {removed_by_skeleton}")
         print(f"внешних молекул отброшено с SI вне диапазона обучения: {removed_out_of_range}")
     print(f"test: {len(test)} строк")
     print(f"целевая переменная совпадает с CC50/IC50: {int(train['target_matches_rule'].fillna(False).sum())} из {len(train)}")
