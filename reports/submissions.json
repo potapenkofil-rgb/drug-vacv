@@ -1,0 +1,9 @@
+[
+  {
+    "file": "submissions/final.csv",
+    "message": "chirality 4096 + target capped at 2500 + prediction ceiling 5000 + known substitution",
+    "score": NaN,
+    "mean": 301.2473531654743,
+    "square_mean": 342936.8129862822
+  }
+]

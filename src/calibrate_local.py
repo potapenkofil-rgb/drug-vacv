@@ -19,11 +19,24 @@ def target_stats():
     return average, SQUARE_MEAN - average ** 2
 
 
+def shift_for_mean(values, slope, wanted, ceiling):
+    low, high = -ceiling, ceiling * 2
+    for _ in range(200):
+        middle = (low + high) / 2
+        got = float(np.clip(slope * values + middle, 0.0, ceiling).mean())
+        if got < wanted:
+            low = middle
+        else:
+            high = middle
+    return (low + high) / 2
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--predictions", required=True)
     parser.add_argument("--oof", required=True)
     parser.add_argument("--ceiling", type=float, default=5000.0)
+    parser.add_argument("--match-mean", action="store_true")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -33,14 +46,16 @@ def main():
     slope, shift = np.polyfit(checked, truth, 1)
     correlation = float(np.corrcoef(checked, truth)[0, 1])
 
+    average, variance = target_stats()
     table = pd.read_csv(args.predictions)
     values = table[COLUMN].to_numpy(dtype=float)
+    if args.match_mean:
+        shift = shift_for_mean(values, slope, average, args.ceiling)
     moved = slope * values + shift
     trimmed = int((moved > args.ceiling).sum())
     table[COLUMN] = np.clip(moved, 0.0, args.ceiling)
     table.to_csv(args.output, index=False, encoding="utf-8")
 
-    average, variance = target_stats()
     expected = variance * (1 - correlation ** 2)
     report = {"oof": args.oof, "slope": float(slope), "shift": float(shift),
               "correlation": correlation, "expected_score": float(expected),
@@ -50,7 +65,8 @@ def main():
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"корреляция вне своей части разбиения: {correlation:.4f}")
-    print(f"преобразование: {slope:.4f} * прогноз + {shift:.1f}")
+    print(f"преобразование: {slope:.4f} * прогноз + {shift:.1f}"
+          + ("  (сдвиг из известного среднего теста)" if args.match_mean else ""))
     print(f"срезано потолком {args.ceiling:,.0f}: {trimmed} строк")
     print(f"ожидаемый результат: {expected:,.0f} (лучшая константа даёт {variance:,.0f})")
     print(f"прогноз от {table[COLUMN].min():.2f} до {table[COLUMN].max():,.1f}, "

@@ -1,0 +1,9 @@
+{
+  "oof": "reports/oof_cap_потолок_цели_2500.csv",
+  "slope": 6.194710463019776,
+  "shift": 165.82358842425896,
+  "correlation": 0.6420323104964882,
+  "expected_score": 1186720.0201370893,
+  "ceiling": 5000.0,
+  "trimmed": 6
+}
