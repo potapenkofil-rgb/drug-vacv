@@ -20,9 +20,11 @@ def target_stats():
     return average, SQUARE_MEAN - average ** 2
 
 
-def solve(full_score, half_score):
-    square = 2 * ((full_score - SQUARE_MEAN) + 2 * (SQUARE_MEAN - half_score))
-    product = (square - (full_score - SQUARE_MEAN)) / 2
+def solve(full_score, part_score, factor):
+    full = full_score - SQUARE_MEAN
+    part = part_score - SQUARE_MEAN
+    square = (part - factor * full) / (factor ** 2 - factor)
+    product = (square - full) / 2
     return square, product
 
 
@@ -31,13 +33,14 @@ def main():
     parser.add_argument("--predictions", required=True)
     parser.add_argument("--full-score", type=float, required=True)
     parser.add_argument("--half-score", type=float, required=True)
+    parser.add_argument("--factor", type=float, default=0.5)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
     table = pd.read_csv(args.predictions)
     predictions = table[COLUMN].to_numpy(dtype=float)
     average, variance = target_stats()
-    square, product = solve(args.full_score, args.half_score)
+    square, product = solve(args.full_score, args.half_score, args.factor)
 
     centre = float(predictions.mean())
     spread = square - centre ** 2

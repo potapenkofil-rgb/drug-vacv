@@ -10,7 +10,7 @@ from catboost import CatBoostRegressor
 from sklearn.model_selection import GroupKFold
 
 from context import apply_encoding, labels_of, learn_encoding
-from features import DESCRIPTOR_NAMES, assay_matrix, assay_vocabulary, build_matrix
+from features import DESCRIPTOR_NAMES, assay_matrix, assay_vocabulary, build_matrix, pair_matrix
 from neighbors import read_across
 from train import PROCESSED, REPORTS, read_config
 
@@ -33,6 +33,13 @@ PLAN = {
     "радиус 3": {"morgan": {"radius": 3, "size": 2048}},
     "отпечаток 4096": {"morgan": {"radius": 2, "size": 4096}},
     "три зерна": {"seeds": 3},
+    "хиральность": {"morgan": {"radius": 2, "size": 2048, "chirality": True}},
+    "хиральность 4096": {"morgan": {"radius": 2, "size": 4096, "chirality": True}},
+    "хиральность радиус 3": {"morgan": {"radius": 3, "size": 2048, "chirality": True}},
+    "хиральность и три зерна": {"seeds": 3, "morgan": {"radius": 2, "size": 2048, "chirality": True}},
+    "пары": {"pairs": 1024},
+    "пары и хиральность": {"pairs": 1024, "morgan": {"radius": 2, "size": 2048, "chirality": True}},
+    "пары 2048": {"pairs": 2048},
     "соседи и корень": {"neighbours": True, "scale": "sqrt"},
     "глубина 4 и корень": {"scale": "sqrt", "regressor": {"depth": 4}},
 }
@@ -141,9 +148,12 @@ def main():
 
     def prepared(shape):
         if shape not in cache:
-            built = build_matrix(table["smiles_canonical"], shape[0], shape[1])
+            built = build_matrix(table["smiles_canonical"], shape[0], shape[1], shape[2])
             extra = assay_matrix(table["strain"], table["culture"], vocabulary)
-            cache[shape] = (np.hstack([built, extra]), built[:, len(DESCRIPTOR_NAMES):])
+            blocks = [built, extra]
+            if shape[3]:
+                blocks.append(pair_matrix(table["smiles_canonical"], shape[3], shape[2]))
+            cache[shape] = (np.hstack(blocks), built[:, len(DESCRIPTOR_NAMES):])
         return cache[shape]
 
     print(f"молекул {len(table)}, опытов в словаре {len(vocabulary)}, "
@@ -152,7 +162,8 @@ def main():
     for name in wanted:
         options = PLAN[name]
         shape = options.get("morgan", config["morgan"])
-        numbers, bits = prepared((shape["radius"], shape["size"]))
+        numbers, bits = prepared((shape["radius"], shape["size"], bool(shape.get("chirality")),
+                                  int(options.get("pairs", 0))))
         labels = labels_of(table, with_title=bool(options.get("title")))
         results.append(run(name, options, numbers, bits, labels, selectivity,
                            structures, checkable, config))

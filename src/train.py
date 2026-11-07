@@ -100,7 +100,8 @@ def add_extras(numbers, bits, labels, selectivity, learn_rows, apply_rows, confi
     return np.hstack(columns)
 
 
-def cross_check(numbers, bits, labels, selectivity, structures, config, target, checkable=None):
+def cross_check(numbers, bits, labels, selectivity, structures, config, target, checkable=None,
+                keep=None):
     folds = config["cv"]["folds"]
     repeats = config["cv"].get("repeats", 1)
     if checkable is None:
@@ -118,6 +119,8 @@ def cross_check(numbers, bits, labels, selectivity, structures, config, target, 
             model = new_model(config["regressor"], config["seed"])
             model.fit(learn_numbers, to_model_scale(selectivity[learn_rows], target))
             predicted[repeat, check_rows] = model.predict(check_numbers)
+            if keep is not None:
+                keep.append(model)
     return predicted.mean(axis=0)
 
 
@@ -148,8 +151,9 @@ def main():
     print(f"соседи: {bool(config.get('use_neighbours'))}, "
           f"кодирование опыта: {bool(config.get('use_context_encoding'))}")
 
+    fold_models = []
     on_model_scale = cross_check(numbers, bits, labels, selectivity, structures, config,
-                                 target, from_organizers)
+                                 target, from_organizers, keep=fold_models)
     checked = selectivity[from_organizers]
     correction = mean_correction(checked, on_model_scale[from_organizers], target,
                                  config.get("mean_correction", False))
@@ -182,6 +186,12 @@ def main():
     model = new_model(config["regressor"], config["seed"])
     model.fit(full_numbers, to_model_scale(selectivity, target))
     model.save_model(str(MODELS / "model.cbm"))
+    folds_here = MODELS / "folds"
+    for old in folds_here.glob("*.cbm"):
+        old.unlink()
+    folds_here.mkdir(parents=True, exist_ok=True)
+    for number, piece in enumerate(fold_models):
+        piece.save_model(str(folds_here / f"model_{number:02d}.cbm"))
     tables, overall = learn_encoding(labels, selectivity)
     (MODELS / "feature_config.json").write_text(
         json.dumps({"morgan": config["morgan"], "target": target, "correction": correction,
@@ -189,7 +199,9 @@ def main():
                     "use_neighbours": bool(config.get("use_neighbours")),
                     "use_context_encoding": bool(config.get("use_context_encoding")),
                     "context_tables": {name: [means, counts] for name, (means, counts) in tables.items()},
-                    "context_overall": overall}, ensure_ascii=False), encoding="utf-8")
+                    "context_overall": overall,
+                    "ceiling": float(config.get("ceiling") or selectivity.max()),
+                    "folds": len(fold_models)}, ensure_ascii=False), encoding="utf-8")
 
     print()
     print_quality("модель с поправкой ", values)

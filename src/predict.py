@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -19,13 +20,17 @@ SUBMISSIONS = Path("submissions")
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--folds", action="store_true")
+    parser.add_argument("--output", default="submissions/submission.csv")
+    args = parser.parse_args()
     SUBMISSIONS.mkdir(parents=True, exist_ok=True)
     settings = json.loads((MODELS / "feature_config.json").read_text(encoding="utf-8"))
     morgan = settings["morgan"]
     test = pd.read_csv(PROCESSED / "test.csv")
     train = pd.read_csv(PROCESSED / "train.csv")
     sample = pd.read_csv(RAW / "sample_submit.csv")
-    highest_known = float(train["si_vacv"].max())
+    highest_known = float(settings.get("ceiling") or train["si_vacv"].max())
 
     numbers = build_matrix(test["smiles_canonical"], morgan["radius"], morgan["size"])
     bits = numbers[:, len(DESCRIPTOR_NAMES):]
@@ -42,9 +47,20 @@ def main():
         columns.append(apply_encoding(labels_of(test), tables, settings["context_overall"]))
     numbers = np.hstack(columns)
 
-    model = CatBoostRegressor()
-    model.load_model(str(MODELS / "model.cbm"))
-    predicted = from_model_scale(model.predict(numbers), settings["target"], settings["correction"])
+    pieces = sorted((MODELS / "folds").glob("*.cbm")) if args.folds else []
+    if pieces:
+        raw = []
+        for path in pieces:
+            piece = CatBoostRegressor()
+            piece.load_model(str(path))
+            raw.append(piece.predict(numbers))
+        on_model_scale = np.mean(raw, axis=0)
+        print(f"усреднено моделей по частям: {len(pieces)}")
+    else:
+        model = CatBoostRegressor()
+        model.load_model(str(MODELS / "model.cbm"))
+        on_model_scale = model.predict(numbers)
+    predicted = from_model_scale(on_model_scale, settings["target"], settings["correction"])
     print(f"признаков у каждой молекулы: {numbers.shape[1]}")
     above_known = int((predicted > highest_known).sum())
     answer = pd.DataFrame({
@@ -58,10 +74,10 @@ def main():
     if list(answer.columns) != list(sample.columns):
         raise ValueError(f"колонки {list(answer.columns)} не совпадают с sample_submit {list(sample.columns)}")
 
-    path = SUBMISSIONS / "submission.csv"
+    path = Path(args.output)
     answer.to_csv(path, index=False, encoding="utf-8")
     print(f"{path}: {len(answer)} строк")
-    print(f"ограничено максимумом обучения ({highest_known:.0f}): {above_known} строк")
+    print(f"ограничено потолком ({highest_known:.0f}): {above_known} строк")
     print(f"прогноз от {answer['SI VACV'].min():.3f} до {answer['SI VACV'].max():.1f}, "
           f"медиана {answer['SI VACV'].median():.2f}")
 

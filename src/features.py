@@ -35,8 +35,9 @@ def descriptor_row(mol):
     return np.array([values.get(name, np.nan) for name in DESCRIPTOR_NAMES], dtype=float)
 
 
-def build_matrix(smiles_list, radius=2, size=2048):
-    generator = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=size)
+def build_matrix(smiles_list, radius=2, size=2048, chirality=False):
+    generator = rdFingerprintGenerator.GetMorganGenerator(
+        radius=radius, fpSize=size, includeChirality=chirality)
     rows = []
     for smiles in smiles_list:
         mol = parse(smiles)
@@ -46,6 +47,18 @@ def build_matrix(smiles_list, radius=2, size=2048):
         rows.append(np.concatenate([descriptor_row(mol), fingerprint]))
     matrix = np.nan_to_num(np.vstack(rows), nan=0.0, posinf=0.0, neginf=0.0)
     return np.clip(matrix, -1e6, 1e6)
+
+
+def pair_matrix(smiles_list, size=2048, chirality=False):
+    generator = rdFingerprintGenerator.GetAtomPairGenerator(
+        fpSize=size, includeChirality=chirality)
+    rows = []
+    for smiles in smiles_list:
+        mol = parse(smiles)
+        if mol is None:
+            raise ValueError(f"не разбирается SMILES: {smiles}")
+        rows.append(np.array(generator.GetCountFingerprintAsNumPy(mol), dtype=float))
+    return np.vstack(rows)
 
 
 def feature_names(size=2048):
