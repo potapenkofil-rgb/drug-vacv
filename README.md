@@ -16,7 +16,7 @@ pip install -r requirements.txt
 
 set PYTHONPATH=src
 python src/validate_data.py
-python src/prepare_data.py
+python src/prepare_data.py --with-external
 python src/train.py
 python src/predict.py
 python src/calibrate.py --predictions submissions/submission.csv ^
@@ -29,6 +29,11 @@ python src/calibrate.py --predictions submissions/submission.csv ^
 `submissions/submission.csv` тоже является готовым ответом, только с худшим результатом.
 
 На Linux и macOS вместо `set PYTHONPATH=src` нужно `export PYTHONPATH=src`.
+
+Флаг `--with-external` подключает выгрузку из ChEMBL, которая уже лежит в
+`data/external/chembl_vacv.csv`, поэтому интернет для воспроизведения не нужен. Заново
+скачать её можно скриптом `src/collect_data.py`. Без этого флага обучение идёт только на
+320 молекулах организаторов, и результат будет другим.
 
 ## Что делает каждый скрипт
 

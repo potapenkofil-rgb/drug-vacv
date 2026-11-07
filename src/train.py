@@ -64,6 +64,7 @@ def quality(actual, predicted):
         "mae": float(np.mean(np.abs(error))),
         "r2": float(1 - np.sum(error ** 2) / spread) if spread else float("nan"),
         "mae_log": float(np.mean(np.abs(error_on_log))),
+        "pearson": float(pd.Series(actual).corr(pd.Series(predicted), method="pearson")),
         "spearman": float(pd.Series(actual).corr(pd.Series(predicted), method="spearman")),
     }
 
