@@ -45,23 +45,35 @@ def new_model(settings, seed):
     )
 
 
+def target_ceiling(target):
+    if not target.startswith("logcap"):
+        return None
+    tail = target[len("logcap"):]
+    return float(tail) if tail else 5000.0
+
+
 def to_model_scale(selectivity, target):
+    limit = target_ceiling(target)
+    if limit is not None:
+        return np.log1p(np.clip(selectivity, 0.0, limit))
     return np.log1p(selectivity) if target == "log" else selectivity
 
 
 def from_model_scale(value, target, correction=1.0):
-    back = np.expm1(value) * correction if target == "log" else value * correction
+    on_log = target == "log" or target.startswith("logcap")
+    back = np.expm1(value) * correction if on_log else value * correction
     return np.clip(back, 0.0, None)
 
 
-def mean_correction(actual, predicted_on_log_scale, target, mode):
-    if target != "log" or mode in (None, False, "none"):
+def mean_correction(actual, predicted_on_log_scale, target, mode, limit=None):
+    if not (target == "log" or target.startswith("logcap")) or mode in (None, False, "none"):
         return 1.0
     if mode is True or mode == "smearing":
         return float(np.mean(np.exp(np.log1p(actual) - predicted_on_log_scale)))
+    wanted = actual if limit is None else np.clip(actual, 0.0, limit)
     plain = from_model_scale(predicted_on_log_scale, target)
     weight = float(np.sum(plain ** 2))
-    return float(np.sum(actual * plain) / weight) if weight > 0 else 1.0
+    return float(np.sum(wanted * plain) / weight) if weight > 0 else 1.0
 
 
 def quality(actual, predicted):
@@ -164,8 +176,10 @@ def main():
     on_model_scale = cross_check(numbers, bits, labels, selectivity, structures, config,
                                  target, from_organizers, keep=fold_models)
     checked = selectivity[from_organizers]
+    highest = float(config.get("ceiling") or np.percentile(selectivity, 99))
     correction = mean_correction(checked, on_model_scale[from_organizers], target,
-                                 config.get("correction", config.get("mean_correction", False)))
+                                 config.get("correction", config.get("mean_correction", False)),
+                                 limit=highest)
     predicted = from_model_scale(on_model_scale[from_organizers], target, correction)
     plain = from_model_scale(on_model_scale[from_organizers], target)
     values = quality(checked, predicted)
@@ -209,7 +223,7 @@ def main():
                     "use_context_encoding": bool(config.get("use_context_encoding")),
                     "context_tables": {name: [means, counts] for name, (means, counts) in tables.items()},
                     "context_overall": overall,
-                    "ceiling": float(config.get("ceiling") or selectivity.max()),
+                    "ceiling": highest,
                     "folds": len(fold_models)}, ensure_ascii=False), encoding="utf-8")
 
     print()

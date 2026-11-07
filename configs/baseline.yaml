@@ -1,8 +1,8 @@
 seed: 42
 threads: 5
-target: log
+target: logcap2500
 ceiling: 5000
-correction: optimal
+correction: none
 use_assay_context: true
 assay_vocabulary_size: 60
 use_neighbours: false

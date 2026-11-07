@@ -249,3 +249,20 @@ python src/prepare_data.py --with-external
 `configs/baseline.yaml`. Метрики проверки сохраняются в `reports/cv_metrics.json`,
 прогнозы кросс-валидации — в `reports/oof_predictions.csv`, история отправок с полученными
 оценками — в `reports/submissions.json`.
+
+## Состояние на момент последнего коммита
+
+Обученный артефакт `models/model.cbm` отстаёт от `configs/baseline.yaml` на один
+параметр: в конфиге стоит `correction: none`, а модель сохранена с `correction: 6.489`.
+Переобучение под `none` было прервано. Перед отправкой нужно прогнать заново:
+
+```
+python src/train.py --config configs/baseline.yaml --table train_534.csv
+python src/predict.py --output submissions/final_raw.csv
+python src/calibrate_local.py --predictions submissions/final_raw.csv ^
+  --oof "reports/oof_cap_потолок_цели_2500.csv" --output submissions/final_cal.csv
+python src/substitute_known.py --predictions submissions/final_cal.csv ^
+  --output submissions/final.csv
+```
+
+Ожидаемая оценка: корреляция 0,642 вне своей части разбиения, MSE около 1 120 000.
