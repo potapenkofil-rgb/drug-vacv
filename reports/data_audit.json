@@ -1,0 +1,24 @@
+{
+  "train_rows": 320,
+  "test_rows": 597,
+  "submission_rows": 597,
+  "submission_columns": [
+    "index",
+    "SI VACV"
+  ],
+  "train_bad_smiles": 0,
+  "test_bad_smiles": 0,
+  "train_duplicate_structures": 8,
+  "test_duplicate_structures": 27,
+  "structures_in_both_train_and_test": 29,
+  "train_missing_ic50": 81,
+  "train_missing_cc50": 2,
+  "train_zero_target": 83,
+  "train_zero_target_without_ic50": 81,
+  "target_equals_cc50_over_ic50": 320,
+  "target_min": 0.0,
+  "target_median": 1.8445,
+  "target_max": 36066.667,
+  "test_rows_with_both_concentrations": 468,
+  "problems": []
+}

@@ -1,0 +1,16 @@
+seed: 42
+threads: 5
+target: log
+mean_correction: true
+use_assay_context: true
+morgan:
+  radius: 2
+  size: 2048
+cv:
+  folds: 5
+  repeats: 3
+regressor:
+  iterations: 1200
+  depth: 6
+  learning_rate: 0.03
+  l2_leaf_reg: 6.0

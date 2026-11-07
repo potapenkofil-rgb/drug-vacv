@@ -1,0 +1,8 @@
+{
+  "source": "submissions/model_assay.csv",
+  "correlation": 0.5979365336384059,
+  "slope": 0.6727528893649573,
+  "shift": 109.85215221721731,
+  "expected_score": 1297110.2183575458,
+  "best_constant_score": 2018936.8824435927
+}
