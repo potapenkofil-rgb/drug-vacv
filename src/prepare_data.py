@@ -40,13 +40,18 @@ def shape(frame, labelled):
 
 
 def load_external():
-    path = EXTERNAL / "chembl_vacv.csv"
-    if not path.exists():
+    files = sorted(EXTERNAL.glob("*.csv"))
+    if not files:
         return None
-    frame = pd.read_csv(path)
+    pieces = []
     needed = {"smiles", "cc50_um", "ic50_um", "si"}
-    if not needed.issubset(frame.columns):
-        raise ValueError(f"{path}: ожидались колонки {sorted(needed)}")
+    for path in files:
+        piece = pd.read_csv(path)
+        if not needed.issubset(piece.columns):
+            raise ValueError(f"{path}: ожидались колонки {sorted(needed)}")
+        print(f"  {path.name}: {len(piece)} записей")
+        pieces.append(piece)
+    frame = pd.concat(pieces, ignore_index=True)
     out = pd.DataFrame()
     out["title"] = frame.get("molecule_chembl_id", pd.Series(["external"] * len(frame)))
     out["smiles_original"] = frame["smiles"].astype(str)

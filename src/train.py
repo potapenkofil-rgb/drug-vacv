@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -9,7 +10,9 @@ import yaml
 from catboost import CatBoostRegressor
 from sklearn.model_selection import GroupKFold
 
-from features import assay_matrix, assay_vocabulary, build_matrix
+from context import apply_encoding, labels_of, learn_encoding
+from features import DESCRIPTOR_NAMES, assay_matrix, assay_vocabulary, build_matrix
+from neighbors import read_across
 
 PROCESSED = Path("data/processed")
 MODELS = Path("models")
@@ -59,17 +62,45 @@ def quality(actual, predicted):
     error = predicted - actual
     error_on_log = np.log1p(predicted) - np.log1p(actual)
     spread = np.sum((actual - actual.mean()) ** 2)
+    capped = pd.Series(np.clip(actual, 0.0, 5000.0))
     return {
         "mse": float(np.mean(error ** 2)),
         "mae": float(np.mean(np.abs(error))),
         "r2": float(1 - np.sum(error ** 2) / spread) if spread else float("nan"),
         "mae_log": float(np.mean(np.abs(error_on_log))),
         "pearson": float(pd.Series(actual).corr(pd.Series(predicted), method="pearson")),
+        "pearson_capped": float(capped.corr(pd.Series(predicted), method="pearson")),
         "spearman": float(pd.Series(actual).corr(pd.Series(predicted), method="spearman")),
     }
 
 
-def cross_check(numbers, selectivity, structures, config, target, checkable=None):
+def base_features(table, config):
+    numbers = build_matrix(table["smiles_canonical"], config["morgan"]["radius"], config["morgan"]["size"])
+    bits = numbers[:, len(DESCRIPTOR_NAMES):]
+    vocabulary = []
+    if config.get("use_assay_context"):
+        vocabulary = assay_vocabulary(table["strain"], table["culture"],
+                                      keep=config.get("assay_vocabulary_size", 25))
+        numbers = np.hstack([numbers, assay_matrix(table["strain"], table["culture"], vocabulary)])
+    return numbers, bits, vocabulary
+
+
+def add_extras(numbers, bits, labels, selectivity, learn_rows, apply_rows, config,
+               reference_rows=None):
+    if reference_rows is None:
+        reference_rows = learn_rows
+    columns = [numbers[apply_rows]]
+    if config.get("use_neighbours"):
+        same = len(apply_rows) == len(reference_rows) and np.array_equal(apply_rows, reference_rows)
+        columns.append(read_across(bits[apply_rows], bits[reference_rows],
+                                   selectivity[reference_rows], skip_self=same))
+    if config.get("use_context_encoding"):
+        tables, overall = learn_encoding(labels.iloc[learn_rows], selectivity[learn_rows])
+        columns.append(apply_encoding(labels.iloc[apply_rows], tables, overall))
+    return np.hstack(columns)
+
+
+def cross_check(numbers, bits, labels, selectivity, structures, config, target, checkable=None):
     folds = config["cv"]["folds"]
     repeats = config["cv"].get("repeats", 1)
     if checkable is None:
@@ -82,36 +113,43 @@ def cross_check(numbers, selectivity, structures, config, target, checkable=None
         for learn_part, check_part in splitter.split(main_rows, selectivity[main_rows], structures[main_rows]):
             learn_rows = np.concatenate([main_rows[learn_part], extra_rows])
             check_rows = main_rows[check_part]
+            learn_numbers = add_extras(numbers, bits, labels, selectivity, learn_rows, learn_rows, config)
+            check_numbers = add_extras(numbers, bits, labels, selectivity, learn_rows, check_rows, config)
             model = new_model(config["regressor"], config["seed"])
-            model.fit(numbers[learn_rows], to_model_scale(selectivity[learn_rows], target))
-            predicted[repeat, check_rows] = model.predict(numbers[check_rows])
+            model.fit(learn_numbers, to_model_scale(selectivity[learn_rows], target))
+            predicted[repeat, check_rows] = model.predict(check_numbers)
     return predicted.mean(axis=0)
 
 
 def print_quality(title, values):
     print(f"{title}: MSE {values['mse']:,.0f} | MAE {values['mae']:.2f} | R2 {values['r2']:.3f} "
-          f"| MAE на логарифме {values['mae_log']:.3f} | Spearman {values['spearman']:.3f}")
+          f"| корреляция при потолке 5000 {values['pearson_capped']:.3f} "
+          f"| Spearman {values['spearman']:.3f}")
 
 
 def main():
-    config = read_config()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="configs/baseline.yaml")
+    parser.add_argument("--table", default="train.csv")
+    args = parser.parse_args()
+    config = read_config(args.config)
     target = config["target"]
     MODELS.mkdir(parents=True, exist_ok=True)
     REPORTS.mkdir(parents=True, exist_ok=True)
 
-    table = pd.read_csv(PROCESSED / "train.csv")
+    table = pd.read_csv(PROCESSED / args.table)
     selectivity = table["si_vacv"].to_numpy(dtype=float)
     structures = table["structure_key"].astype(str).to_numpy()
-    numbers = build_matrix(table["smiles_canonical"], config["morgan"]["radius"], config["morgan"]["size"])
-    vocabulary = []
-    if config.get("use_assay_context"):
-        vocabulary = assay_vocabulary(table["strain"], table["culture"])
-        numbers = np.hstack([numbers, assay_matrix(table["strain"], table["culture"], vocabulary)])
+    labels = labels_of(table)
+    numbers, bits, vocabulary = base_features(table, config)
     from_organizers = (table["source"] == "organizers").to_numpy()
     print(f"молекул: {len(table)} (из них внешних {int((~from_organizers).sum())}), "
           f"признаков у каждой: {numbers.shape[1]}, цель: {target}")
+    print(f"соседи: {bool(config.get('use_neighbours'))}, "
+          f"кодирование опыта: {bool(config.get('use_context_encoding'))}")
 
-    on_model_scale = cross_check(numbers, selectivity, structures, config, target, from_organizers)
+    on_model_scale = cross_check(numbers, bits, labels, selectivity, structures, config,
+                                 target, from_organizers)
     checked = selectivity[from_organizers]
     correction = mean_correction(checked, on_model_scale[from_organizers], target,
                                  config.get("mean_correction", False))
@@ -139,12 +177,19 @@ def main():
         "constant_mean": constant,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    everything = np.arange(len(table))
+    full_numbers = add_extras(numbers, bits, labels, selectivity, everything, everything, config)
     model = new_model(config["regressor"], config["seed"])
-    model.fit(numbers, to_model_scale(selectivity, target))
+    model.fit(full_numbers, to_model_scale(selectivity, target))
     model.save_model(str(MODELS / "model.cbm"))
+    tables, overall = learn_encoding(labels, selectivity)
     (MODELS / "feature_config.json").write_text(
         json.dumps({"morgan": config["morgan"], "target": target, "correction": correction,
-                    "assay_vocabulary": vocabulary}, ensure_ascii=False), encoding="utf-8")
+                    "assay_vocabulary": vocabulary,
+                    "use_neighbours": bool(config.get("use_neighbours")),
+                    "use_context_encoding": bool(config.get("use_context_encoding")),
+                    "context_tables": {name: [means, counts] for name, (means, counts) in tables.items()},
+                    "context_overall": overall}, ensure_ascii=False), encoding="utf-8")
 
     print()
     print_quality("модель с поправкой ", values)

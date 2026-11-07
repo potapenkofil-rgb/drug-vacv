@@ -40,7 +40,10 @@ def request_pages(path, params, key, limit):
     collected = []
     while len(collected) < limit:
         page = dict(params, limit=min(200, limit - len(collected)), offset=len(collected))
-        answer = request_json(path, page)
+        try:
+            answer = request_json(path, page, attempts=2)
+        except Exception:
+            break
         chunk = answer.get(key, [])
         collected.extend(chunk)
         if len(chunk) < page["limit"]:
@@ -48,12 +51,12 @@ def request_pages(path, params, key, limit):
     return collected
 
 
-def vaccinia_targets():
-    answer = request_json("target/search", {"q": "vaccinia", "limit": 100})
+def targets_for(keyword):
+    answer = request_json("target/search", {"q": keyword, "limit": 100})
     found = []
     for target in answer.get("targets", []):
         description = f"{target.get('organism') or ''} {target.get('pref_name') or ''}".lower()
-        if "vaccinia" in description:
+        if keyword in description:
             found.append(target["target_chembl_id"])
     return sorted(set(found))
 
@@ -106,12 +109,14 @@ def doi_by_document(document_ids):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=2000)
+    parser.add_argument("--organisms", default="vaccinia")
     parser.add_argument("--output", default="data/external/chembl_vacv.csv")
     args = parser.parse_args()
 
     EXTERNAL.mkdir(parents=True, exist_ok=True)
-    targets = vaccinia_targets()
-    print(f"мишеней Vaccinia в ChEMBL: {len(targets)}")
+    keywords = [word.strip().lower() for word in args.organisms.split(",") if word.strip()]
+    targets = sorted({name for word in keywords for name in targets_for(word)})
+    print(f"мишеней по запросу {keywords} в ChEMBL: {len(targets)}")
 
     measurements = []
     for target in targets:
@@ -127,8 +132,8 @@ def main():
 
     toxicity_records = []
     for part in by_parts(molecules, 10):
-        answer = request_json("activity", {"molecule_chembl_id__in": ",".join(part), "limit": 200})
-        toxicity_records.extend(answer.get("activities", []))
+        toxicity_records.extend(request_pages(
+            "activity", {"molecule_chembl_id__in": ",".join(part)}, "activities", 3000))
     toxicity = as_table(toxicity_records, TOXICITY_TYPES)
     print(f"измерений цитотоксичности: {len(toxicity)}")
 

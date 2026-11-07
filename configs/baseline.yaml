@@ -3,6 +3,9 @@ threads: 5
 target: log
 mean_correction: true
 use_assay_context: true
+assay_vocabulary_size: 60
+use_neighbours: false
+use_context_encoding: false
 morgan:
   radius: 2
   size: 2048
